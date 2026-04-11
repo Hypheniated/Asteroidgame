@@ -28,9 +28,11 @@ canvas { display:block; }
 <button id="autoplayBtn">AUTOPLAY OFF</button>
 <script>
 // =====================================================================
-//  METEOR SHIELD v2.1
-//  100 Levels | Shop Every 10 | Void Meteors | Win at 500 Deflections
-//  Meteors are 3-4x faster. Wave counter never goes negative.
+//  METEOR SHIELD v3.0
+//  - Asteroids ALWAYS keep coming until wave is fully exhausted
+//  - Shop every 5 levels
+//  - Much shorter spawn intervals
+//  - Expanded upgrades (14) and debuffs (12)
 // =====================================================================
 
 const canvas = document.getElementById('c');
@@ -39,49 +41,73 @@ const apBtn  = document.getElementById('autoplayBtn');
 
 const WIN_DEFLECTIONS = 500;
 const MAX_LEVEL       = 100;
+const SHOP_EVERY      = 5;     // shop every N levels
+const SPEED_SCALE     = 9.0;   // global meteor speed multiplier
 
-// Speed multiplier — cranked way up
-const SPEED_SCALE = 9.0;
-
-// ── SHOP DATA ─────────────────────────────────────────────────────────
+// ── UPGRADES (14 total) ───────────────────────────────────────────────
 const UPGRADES = [
-  { id:'arcWide',    name:'Wide Arc',       desc:'Shield arc +15 degrees',        cost:80,
-    apply: m => { m.arcBonus += 15; } },
-  { id:'fastShield', name:'Swift Shield',   desc:'Shield rotates 25% faster',      cost:100,
-    apply: m => { m.shieldSpeedMult *= 1.25; } },
-  { id:'bonusPts',   name:'Bounty Hunter',  desc:'+20 pts per deflection',         cost:120,
+  { id:'arcWide',     name:'Wide Arc',        desc:'Shield arc +18 degrees',            cost:80,
+    apply: m => { m.arcBonus += 18; } },
+  { id:'arcWide2',    name:'Mega Arc',         desc:'Shield arc +30 degrees',            cost:200,
+    apply: m => { m.arcBonus += 30; } },
+  { id:'fastShield',  name:'Swift Shield',    desc:'Shield rotates 30% faster',          cost:100,
+    apply: m => { m.shieldSpeedMult *= 1.30; } },
+  { id:'bonusPts',    name:'Bounty Hunter',   desc:'+20 pts per deflection',             cost:120,
     apply: m => { m.deflectBonus += 20; } },
-  { id:'regen',      name:'Nano-Repair',    desc:'Heal +5 HP after each level',    cost:150,
-    apply: m => { m.regenPerLevel += 5; } },
-  { id:'slowField',  name:'Gravity Field',  desc:'All meteors 10% slower',         cost:200,
-    apply: m => { m.speedMult *= 0.90; } },
-  { id:'splitGuard', name:'Split Guard',    desc:'Split meteors deal half damage', cost:180,
+  { id:'bonusPts2',   name:'Score Surge',     desc:'+40 pts per deflection',             cost:250,
+    apply: m => { m.deflectBonus += 40; } },
+  { id:'regen',       name:'Nano-Repair',     desc:'Heal +8 HP after each level',        cost:150,
+    apply: m => { m.regenPerLevel += 8; } },
+  { id:'regenBig',    name:'Cryo-Regen',      desc:'Heal +20 HP after each level',       cost:350,
+    apply: m => { m.regenPerLevel += 20; } },
+  { id:'slowField',   name:'Gravity Field',   desc:'All meteors 12% slower',             cost:200,
+    apply: m => { m.speedMult *= 0.88; } },
+  { id:'slowField2',  name:'Dark Gravity',    desc:'All meteors 22% slower',             cost:380,
+    apply: m => { m.speedMult *= 0.78; } },
+  { id:'splitGuard',  name:'Split Guard',     desc:'Split meteors deal half damage',     cost:180,
     apply: m => { m.splitGuard = true; } },
-  { id:'voidSense',  name:'Void Sense',     desc:'Void meteors shown 1s early',   cost:220,
+  { id:'voidSense',   name:'Void Sense',      desc:'Void meteors warned 1.5s early',     cost:220,
     apply: m => { m.voidWarning = true; } },
-  { id:'extraPts',   name:'Score Rush',     desc:'+15 pts per deflection',         cost:90,
+  { id:'doubleShot',  name:'Twin Deflect',    desc:'Deflecting also damages nearby meteors', cost:300,
+    apply: m => { m.twinDeflect = true; } },
+  { id:'maxHp',       name:'Reinforced Core', desc:'Planet max HP +25',                  cost:280,
+    apply: m => { m.maxHpBonus += 25; } },
+  { id:'scoreRush',   name:'Score Rush',      desc:'+15 pts per deflection',             cost:90,
     apply: m => { m.deflectBonus += 15; } },
 ];
 
+// ── DEBUFFS (12 total) ────────────────────────────────────────────────
 const DEBUFFS = [
-  { id:'narrowArc',  name:'Cracked Shield', desc:'Shield arc -10 degrees',         cost:0,
-    apply: m => { m.arcBonus -= 10; } },
-  { id:'slowShield', name:'Heavy Plating',  desc:'Shield rotates 20% slower',      cost:0,
+  { id:'narrowArc',   name:'Cracked Shield',  desc:'Shield arc -12 degrees',             cost:0,
+    apply: m => { m.arcBonus -= 12; } },
+  { id:'narrowArc2',  name:'Shattered Edge',  desc:'Shield arc -22 degrees',             cost:0,
+    apply: m => { m.arcBonus -= 22; } },
+  { id:'slowShield',  name:'Heavy Plating',   desc:'Shield rotates 20% slower',          cost:0,
     apply: m => { m.shieldSpeedMult *= 0.80; } },
-  { id:'moreDmg',    name:'Brittle Core',   desc:'Planet takes +5 extra dmg/hit',  cost:0,
-    apply: m => { m.dmgBonus += 5; } },
-  { id:'fasterM',    name:'Jet Stream',     desc:'All meteors 15% faster',         cost:0,
-    apply: m => { m.speedMult *= 1.15; } },
-  { id:'lessScore',  name:'Static Noise',   desc:'-5 pts per deflection',          cost:0,
-    apply: m => { m.deflectBonus = Math.max(0, m.deflectBonus - 5); } },
-  { id:'voidRift',   name:'Void Rift',      desc:'Void meteors appear 50% more',   cost:0,
-    apply: m => { m.voidFreq *= 1.5; } },
+  { id:'slugShield',  name:'Lead Shield',     desc:'Shield rotates 35% slower',          cost:0,
+    apply: m => { m.shieldSpeedMult *= 0.65; } },
+  { id:'moreDmg',     name:'Brittle Core',    desc:'Planet takes +6 extra dmg/hit',      cost:0,
+    apply: m => { m.dmgBonus += 6; } },
+  { id:'moreDmg2',    name:'Glass Planet',    desc:'Planet takes +15 extra dmg/hit',     cost:0,
+    apply: m => { m.dmgBonus += 15; } },
+  { id:'fasterM',     name:'Jet Stream',      desc:'All meteors 18% faster',             cost:0,
+    apply: m => { m.speedMult *= 1.18; } },
+  { id:'fasterM2',    name:'Hyperdrive',      desc:'All meteors 35% faster',             cost:0,
+    apply: m => { m.speedMult *= 1.35; } },
+  { id:'lessScore',   name:'Static Noise',    desc:'-8 pts per deflection',              cost:0,
+    apply: m => { m.deflectBonus = Math.max(0, m.deflectBonus - 8); } },
+  { id:'voidRift',    name:'Void Rift',       desc:'Void meteors 60% more frequent',     cost:0,
+    apply: m => { m.voidFreq *= 1.6; } },
+  { id:'moreMeteors', name:'Meteor Storm',    desc:'+20% more meteors per wave',         cost:0,
+    apply: m => { m.meteorMult = (m.meteorMult||1) * 1.20; } },
+  { id:'loseRegen',   name:'Corrosion',       desc:'Lose 3 HP at start of each level',  cost:0,
+    apply: m => { m.regenPerLevel -= 3; } },
 ];
 
 // ── GAME STATE ────────────────────────────────────────────────────────
 const gs = {
   cx:0, cy:0,
-  phase:'playing',  // playing | levelComplete | shop | gameover | win
+  phase:'playing',
   level:1,
   score:0,
   planetHealth:100,
@@ -95,11 +121,16 @@ const gs = {
   stars:[],
   twinkleStars:[],
 
-  spawnTimer:0,
-  spawnCount:0,       // how many meteors we've queued this level
-  // waveCap: set at level start = cfg.meteors; never mutated mid-level by splits
-  waveCap:0,
-  cfg:null,
+  // SPAWN SYSTEM — the key to "always keep coming":
+  // totalToSpawn = total meteors for this level (fixed at start)
+  // spawnedSoFar = how many we've actually pushed into the world
+  // activeMeteors = live count tracked separately (not .length which includes culled)
+  // Level ends only when spawnedSoFar >= totalToSpawn AND activeMeteors === 0
+  totalToSpawn: 0,
+  spawnedSoFar: 0,
+  activeMeteors: 0,
+  spawnTimer: 0,
+  cfg: null,
 
   transitionTimer:0,
   shieldPulse:0,
@@ -121,6 +152,9 @@ const gs = {
     voidWarning:false,
     dmgBonus:0,
     voidFreq:1,
+    twinDeflect:false,
+    maxHpBonus:0,
+    meteorMult:1,
   },
 
   shop:{ boughtU:[], boughtD:[], funds:0, clicks:[] },
@@ -145,25 +179,23 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // ── LEVEL CONFIG ─────────────────────────────────────────────────────
-// Base speed 4.5 → 22 (SPEED_SCALE = 3.5 is already multiplied in spawn)
 function getLevelCfg(lvl) {
-  const t   = (lvl - 1) / 99;                       // 0 → 1
-  // Raw speeds before SPEED_SCALE: 1.3 → 6.3
-  // After ×3.5: effective 4.55 → 22.05
-  const spd = 1.3 + t * 5.0;
-  const cnt = Math.floor(3 + t * 60);               // 3 → 63 meteors
-  const int = Math.max(320, 2800 - t * 2480);       // 2800ms → 320ms spawn interval
-  const arc = Math.max(48, 100 - t * 52);           // 100° → 48°
-  const dmg = 10 + t * 32;                          // 10 → 42 damage per hit
+  const t   = (lvl - 1) / 99;
+  const spd = 1.3 + t * 5.0;                        // raw; ×SPEED_SCALE in spawn
+  const cnt = Math.floor((3 + t * 57) * (gs.mods.meteorMult||1));
+  // Interval: starts at 700ms, drops to 120ms — much faster than before
+  const interval = Math.max(120, 700 - t * 580);
+  const arc = Math.max(48, 100 - t * 52);
+  const dmg = 10 + t * 32;
   return {
     meteors: cnt,
-    speed:   spd,
-    spawnInterval: int,
-    arcDeg:  arc,
-    split:   lvl >= 4,
-    sizes:   lvl >= 5,
-    curve:   lvl >= 6,
-    burst:   lvl >= 7,
+    speed: spd,
+    spawnInterval: interval,
+    arcDeg: arc,
+    split:  lvl >= 4,
+    sizes:  lvl >= 5,
+    curve:  lvl >= 6,
+    burst:  lvl >= 7,
     baseDmg: dmg,
   };
 }
@@ -171,17 +203,12 @@ function getLevelCfg(lvl) {
 // ── STARS ────────────────────────────────────────────────────────────
 function initStars() {
   gs.stars = Array.from({length:170}, () => ({
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height,
-    r: Math.random() * 1.5 + 0.3,
-    a: Math.random() * 0.7 + 0.3,
+    x:Math.random()*canvas.width, y:Math.random()*canvas.height,
+    r:Math.random()*1.5+0.3, a:Math.random()*0.7+0.3,
   }));
   gs.twinkleStars = Array.from({length:22}, () => ({
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height,
-    r: Math.random() * 1.2 + 0.5,
-    phase: Math.random() * Math.PI * 2,
-    speed: Math.random() * 2 + 1,
+    x:Math.random()*canvas.width, y:Math.random()*canvas.height,
+    r:Math.random()*1.2+0.5, phase:Math.random()*Math.PI*2, speed:Math.random()*2+1,
   }));
 }
 
@@ -189,18 +216,23 @@ function initStars() {
 function initLevel(lvl) {
   gs.level        = lvl;
   gs.cfg          = getLevelCfg(lvl);
-  gs.waveCap      = gs.cfg.meteors;   // fixed cap — never changes mid-level
+  gs.totalToSpawn = gs.cfg.meteors;
+  gs.spawnedSoFar = 0;
+  gs.activeMeteors = 0;
   gs.meteors      = [];
   gs.particles    = [];
-  gs.spawnTimer   = 500;
-  gs.spawnCount   = 0;                // counts up, capped at waveCap
+  gs.spawnTimer   = 300;   // short initial delay before first meteor
   gs.levelDefl    = 0;
   gs.perfectLevel = true;
   gs.phase        = 'playing';
   gs.voidWarnTimer = 0;
-  gs.voidCounter  = Math.max(1, Math.floor((10 + Math.random() * 8) / gs.mods.voidFreq));
-  if (lvl > 1 && gs.mods.regenPerLevel > 0)
-    gs.planetHealth = Math.min(gs.maxHealth, gs.planetHealth + gs.mods.regenPerLevel);
+  gs.voidCounter  = Math.max(1, Math.floor((8 + Math.random()*6) / gs.mods.voidFreq));
+
+  // Apply regen / corrosion
+  if (lvl > 1) {
+    const delta = gs.mods.regenPerLevel;
+    gs.planetHealth = Math.min(gs.maxHealth, Math.max(1, gs.planetHealth + delta));
+  }
 }
 
 function initGame() {
@@ -212,40 +244,36 @@ function initGame() {
   gs.ai    = {targetAngle:0, reactionTimer:0, pendingTarget:0, angleError:0};
   gs.mods  = {
     arcBonus:0, shieldSpeedMult:1, deflectBonus:0, regenPerLevel:0,
-    speedMult:1, splitGuard:false, voidWarning:false, dmgBonus:0, voidFreq:1,
+    speedMult:1, splitGuard:false, voidWarning:false, dmgBonus:0,
+    voidFreq:1, twinDeflect:false, maxHpBonus:0, meteorMult:1,
   };
   gs.shop = {boughtU:[], boughtD:[], funds:0, clicks:[]};
   initLevel(1);
 }
 
-// ── SPAWN VOID METEOR ────────────────────────────────────────────────
+// ── PUSH METEOR INTO WORLD ────────────────────────────────────────────
+// Every time we actually add a meteor object we call trackSpawn() so
+// activeMeteors stays correct regardless of splits / culling.
+function trackSpawn() { gs.activeMeteors++; }
+function trackRemove() { gs.activeMeteors = Math.max(0, gs.activeMeteors - 1); }
+
 function spawnVoid() {
   const a    = Math.random() * Math.PI * 2;
   const dist = Math.max(canvas.width, canvas.height) * 0.75;
-  const sx   = gs.cx + Math.cos(a) * dist;
-  const sy   = gs.cy + Math.sin(a) * dist;
-  const dx   = gs.cx - sx, dy = gs.cy - sy;
-  const len  = Math.hypot(dx, dy);
-  // Void is slightly slower than normal meteors (still scary)
-  const spd  = gs.cfg.speed * SPEED_SCALE * 0.65 * gs.mods.speedMult;
-  if (gs.mods.voidWarning) { gs.voidWarnTimer = 1.2; gs.voidWarnAngle = a; }
-  gs.meteors.push({
-    x:sx, y:sy, vx:(dx/len)*spd, vy:(dy/len)*spd,
-    radius:14, curvature:0, trail:[], active:true,
-    isVoid:true, size:'normal', canSplit:false,
-  });
+  const sx   = gs.cx + Math.cos(a)*dist, sy = gs.cy + Math.sin(a)*dist;
+  const dx   = gs.cx - sx, dy = gs.cy - sy, len = Math.hypot(dx,dy);
+  const spd  = gs.cfg.speed * SPEED_SCALE * 0.7 * gs.mods.speedMult;
+  if (gs.mods.voidWarning) { gs.voidWarnTimer = 1.5; gs.voidWarnAngle = a; }
+  gs.meteors.push({ x:sx,y:sy, vx:(dx/len)*spd,vy:(dy/len)*spd,
+    radius:14, curvature:0, trail:[], active:true, isVoid:true, size:'normal', canSplit:false });
+  trackSpawn();
 }
 
-// ── SPAWN NORMAL METEOR ───────────────────────────────────────────────
 function spawnMeteor(small, fromAngle) {
-  const a    = (fromAngle !== undefined) ? fromAngle : Math.random() * Math.PI * 2;
+  const a    = (fromAngle !== undefined) ? fromAngle : Math.random()*Math.PI*2;
   const dist = Math.max(canvas.width, canvas.height) * 0.75;
-  const sx   = gs.cx + Math.cos(a) * dist;
-  const sy   = gs.cy + Math.sin(a) * dist;
-  const dx   = gs.cx - sx, dy = gs.cy - sy;
-  const len  = Math.hypot(dx, dy);
-
-  // Apply SPEED_SCALE here — this is the 3-4x boost
+  const sx   = gs.cx + Math.cos(a)*dist, sy = gs.cy + Math.sin(a)*dist;
+  const dx   = gs.cx - sx, dy = gs.cy - sy, len = Math.hypot(dx,dy);
   let spd    = gs.cfg.speed * SPEED_SCALE * gs.mods.speedMult;
   let radius = 11;
   if (gs.cfg.sizes) {
@@ -253,637 +281,548 @@ function spawnMeteor(small, fromAngle) {
     else        { spd *= 0.7; radius = 16; }
   }
   if (small) radius = 7;
-
-  const curv = (gs.cfg.curve && Math.random() < 0.35)
-    ? (Math.random() - 0.5) * 0.004 : 0;
-
-  gs.meteors.push({
-    x:sx, y:sy, vx:(dx/len)*spd, vy:(dy/len)*spd,
-    radius, curvature:curv, trail:[], active:true,
-    isVoid:false, size: small ? 'small' : 'normal',
-    // canSplit uses original split criteria but NOT small/splits-of-splits
-    canSplit: gs.cfg.split && !small && radius > 9,
-  });
+  const curv = (gs.cfg.curve && Math.random()<0.35) ? (Math.random()-0.5)*0.004 : 0;
+  gs.meteors.push({ x:sx,y:sy, vx:(dx/len)*spd,vy:(dy/len)*spd,
+    radius, curvature:curv, trail:[], active:true, isVoid:false,
+    size:small?'small':'normal', canSplit:gs.cfg.split&&!small&&radius>9 });
+  trackSpawn();
 }
 
 // ── WAVE SPAWNER ─────────────────────────────────────────────────────
-// spawnCount = slots consumed this level. waveCap = total allowed.
-// Void and burst both consume slots. Split children do NOT.
-// The key rule: ALWAYS consume exactly the remaining slots if we're near cap,
-// and NEVER call doSpawn again once spawnCount >= waveCap (enforced by caller).
+// Called on a timer. Pushes meteors until spawnedSoFar >= totalToSpawn.
+// Uses void counter, burst logic — all bounded to remaining quota.
+// This is the ONLY place spawnedSoFar is incremented.
 function doSpawn() {
-  const remaining = gs.waveCap - gs.spawnCount;
-  if (remaining <= 0) return; // hard guard — should not happen due to caller check
+  const remaining = gs.totalToSpawn - gs.spawnedSoFar;
+  if (remaining <= 0) return;
 
-  // Only consider a void if it fits in remaining slots AND counter is due
   gs.voidCounter--;
-  if (gs.voidCounter <= 0 && remaining >= 1) {
-    gs.spawnCount++;
-    spawnVoid();
-    gs.voidCounter = Math.max(1, Math.floor((10 + Math.random() * 8) / gs.mods.voidFreq));
+  if (gs.voidCounter <= 0) {
+    gs.voidCounter = Math.max(1, Math.floor((8+Math.random()*6)/gs.mods.voidFreq));
+    if (remaining >= 1) { spawnVoid(); gs.spawnedSoFar++; }
     return;
   }
-  // Reset void counter if it fired but no slot available (edge case: remaining==0 caught above)
-  if (gs.voidCounter <= 0) {
-    gs.voidCounter = Math.max(1, Math.floor((10 + Math.random() * 8) / gs.mods.voidFreq));
-  }
 
-  // Burst: up to 3 meteors — capped to remaining slots so we never overshoot
   if (gs.cfg.burst && Math.random() < 0.22 && remaining >= 2) {
     const slots = Math.min(3, remaining);
-    const base  = Math.random() * Math.PI * 2;
-    for (let i = 0; i < slots; i++) spawnMeteor(false, base + (i - 1) * 0.12);
-    gs.spawnCount += slots;
+    const base  = Math.random()*Math.PI*2;
+    for (let i = 0; i < slots; i++) spawnMeteor(false, base+(i-1)*0.12);
+    gs.spawnedSoFar += slots;
   } else {
-    spawnMeteor(gs.cfg.sizes && Math.random() < 0.4);
-    gs.spawnCount++;
+    spawnMeteor(gs.cfg.sizes && Math.random()<0.4);
+    gs.spawnedSoFar++;
   }
 }
 
 // ── UTILS ────────────────────────────────────────────────────────────
-function angleDiff(a, b) {
-  let d = b - a;
-  while (d >  Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
+function angleDiff(a,b) {
+  let d=b-a;
+  while(d>Math.PI)d-=Math.PI*2;
+  while(d<-Math.PI)d+=Math.PI*2;
   return d;
 }
-
 function hitsShield(m) {
-  if (m.isVoid) return false; // void passes through — can't block!
-  const arcRad = (Math.max(20, gs.cfg.arcDeg + gs.mods.arcBonus) / 2) * (Math.PI / 180);
-  const dx = m.x - gs.cx, dy = m.y - gs.cy;
-  if (Math.abs(Math.hypot(dx, dy) - gs.shieldR) > m.radius + 6) return false;
-  return Math.abs(angleDiff(gs.shieldAngle, Math.atan2(dy, dx))) <= arcRad;
+  if (m.isVoid) return false;
+  const arcRad=(Math.max(20,gs.cfg.arcDeg+gs.mods.arcBonus)/2)*(Math.PI/180);
+  const dx=m.x-gs.cx, dy=m.y-gs.cy;
+  if (Math.abs(Math.hypot(dx,dy)-gs.shieldR)>m.radius+6) return false;
+  return Math.abs(angleDiff(gs.shieldAngle,Math.atan2(dy,dx)))<=arcRad;
 }
-
 function hitsPlanet(m) {
-  return Math.hypot(m.x - gs.cx, m.y - gs.cy) < gs.planetR + m.radius - 4;
+  return Math.hypot(m.x-gs.cx,m.y-gs.cy)<gs.planetR+m.radius-4;
 }
-
-function sparks(x, y, n, col, fast) {
-  for (let i = 0; i < n; i++) {
-    const spd = (fast ? 3 : 1.5) + Math.random() * (fast ? 5 : 3);
-    const a   = Math.random() * Math.PI * 2;
-    const p   = { x, y, vx:Math.cos(a)*spd, vy:Math.sin(a)*spd,
-                  life:0.8 + Math.random()*0.6, maxLife:1, color:col,
-                  radius:Math.random()*3+1 };
-    p.maxLife = p.life;
-    gs.particles.push(p);
+function sparks(x,y,n,col,fast) {
+  for (let i=0;i<n;i++) {
+    const spd=(fast?3:1.5)+Math.random()*(fast?5:3), a=Math.random()*Math.PI*2;
+    const p={x,y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,
+             life:0.8+Math.random()*0.6,maxLife:1,color:col,radius:Math.random()*3+1};
+    p.maxLife=p.life; gs.particles.push(p);
   }
 }
 
 // ── AUTOPLAY AI ──────────────────────────────────────────────────────
-// Finds closest non-void meteor, waits 150ms reaction delay, then aims
-// with ±5° randomness so it occasionally fails.
 function updateAI(dt) {
-  const ai = gs.ai;
-  let best = null, bestDist = Infinity;
+  const ai=gs.ai;
+  let best=null, bestDist=Infinity;
   for (const m of gs.meteors) {
-    if (!m.active || m.isVoid) continue;
-    const d = Math.hypot(m.x - gs.cx, m.y - gs.cy);
-    if (d < bestDist) { bestDist = d; best = m; }
+    if (!m.active||m.isVoid) continue;
+    const d=Math.hypot(m.x-gs.cx,m.y-gs.cy);
+    if (d<bestDist){bestDist=d;best=m;}
   }
   if (best) {
-    ai.reactionTimer -= dt * 1000;
-    if (ai.reactionTimer <= 0) {
-      ai.reactionTimer  = 150;
-      ai.pendingTarget  = Math.atan2(best.y - gs.cy, best.x - gs.cx);
-      ai.angleError     = (Math.random() - 0.5) * (10 * Math.PI / 180);
+    ai.reactionTimer-=dt*1000;
+    if (ai.reactionTimer<=0) {
+      ai.reactionTimer=150;
+      ai.pendingTarget=Math.atan2(best.y-gs.cy,best.x-gs.cx);
+      ai.angleError=(Math.random()-0.5)*(10*Math.PI/180);
     }
-    ai.targetAngle = ai.pendingTarget + ai.angleError;
+    ai.targetAngle=ai.pendingTarget+ai.angleError;
   }
-  const diff = angleDiff(gs.shieldAngle, ai.targetAngle);
-  gs.shieldAngle += Math.sign(diff) *
-    Math.min(Math.abs(diff), 4.5 * gs.mods.shieldSpeedMult * dt);
+  const diff=angleDiff(gs.shieldAngle,ai.targetAngle);
+  gs.shieldAngle+=Math.sign(diff)*Math.min(Math.abs(diff),4.5*gs.mods.shieldSpeedMult*dt);
 }
 
 // ── INPUT ────────────────────────────────────────────────────────────
-const keys = {};
-window.addEventListener('keydown', e => { keys[e.key] = true; });
-window.addEventListener('keyup',   e => { keys[e.key] = false; });
-canvas.addEventListener('mousemove', e => {
-  if (gs.autoplay) return;
-  gs.targetShieldAngle = Math.atan2(e.clientY - gs.cy, e.clientX - gs.cx);
+const keys={};
+window.addEventListener('keydown',e=>{keys[e.key]=true;});
+window.addEventListener('keyup',  e=>{keys[e.key]=false;});
+canvas.addEventListener('mousemove',e=>{
+  if(gs.autoplay)return;
+  gs.targetShieldAngle=Math.atan2(e.clientY-gs.cy,e.clientX-gs.cx);
 });
-canvas.addEventListener('click', e => {
-  if (gs.phase === 'shop')                          handleShopClick(e);
-  else if (gs.phase === 'gameover' || gs.phase === 'win') handleRestartClick(e);
+canvas.addEventListener('click',e=>{
+  if(gs.phase==='shop') handleShopClick(e);
+  else if(gs.phase==='gameover'||gs.phase==='win') handleRestartClick(e);
 });
-apBtn.addEventListener('click', () => {
-  gs.autoplay = !gs.autoplay;
-  apBtn.textContent = gs.autoplay ? 'AUTOPLAY ON' : 'AUTOPLAY OFF';
-  apBtn.classList.toggle('active', gs.autoplay);
+apBtn.addEventListener('click',()=>{
+  gs.autoplay=!gs.autoplay;
+  apBtn.textContent=gs.autoplay?'AUTOPLAY ON':'AUTOPLAY OFF';
+  apBtn.classList.toggle('active',gs.autoplay);
 });
 
 // ── UPDATE ───────────────────────────────────────────────────────────
 function update(dt) {
-  dt = Math.min(dt, 0.05);
-  gs.shieldPulse += dt * 3;
+  dt=Math.min(dt,0.05);
+  gs.shieldPulse+=dt*3;
 
-  if (gs.shake.dur > 0) {
-    gs.shake.dur -= dt;
-    gs.shake.x = (Math.random() - 0.5) * 10 * gs.shake.dur;
-    gs.shake.y = (Math.random() - 0.5) * 10 * gs.shake.dur;
-  } else { gs.shake.x = gs.shake.y = 0; }
-  gs.flash.a = Math.max(0, gs.flash.a - dt * 3);
-  if (gs.voidWarnTimer > 0) gs.voidWarnTimer -= dt;
+  if(gs.shake.dur>0){
+    gs.shake.dur-=dt;
+    gs.shake.x=(Math.random()-0.5)*10*gs.shake.dur;
+    gs.shake.y=(Math.random()-0.5)*10*gs.shake.dur;
+  } else {gs.shake.x=gs.shake.y=0;}
+  gs.flash.a=Math.max(0,gs.flash.a-dt*3);
+  if(gs.voidWarnTimer>0)gs.voidWarnTimer-=dt;
 
-  if (gs.phase === 'shop' || gs.phase === 'gameover' || gs.phase === 'win') return;
+  if(gs.phase==='shop'||gs.phase==='gameover'||gs.phase==='win')return;
 
-  if (gs.phase === 'levelComplete') {
-    gs.transitionTimer -= dt;
-    if (gs.transitionTimer <= 0) {
-      const next = gs.level + 1;
-      if (gs.level % 10 === 0 && next <= MAX_LEVEL)  openShop();
-      else if (next > MAX_LEVEL) {
-        gs.phase = gs.totalDefl >= WIN_DEFLECTIONS ? 'win' : 'playing';
-        if (gs.phase === 'playing') initLevel(next);
-      } else { initLevel(next); }
+  if(gs.phase==='levelComplete'){
+    gs.transitionTimer-=dt;
+    if(gs.transitionTimer<=0){
+      const next=gs.level+1;
+      if(gs.level%SHOP_EVERY===0&&next<=MAX_LEVEL) openShop();
+      else if(next>MAX_LEVEL){
+        gs.phase=gs.totalDefl>=WIN_DEFLECTIONS?'win':'playing';
+        if(gs.phase==='playing')initLevel(next);
+      } else {initLevel(next);}
     }
     return;
   }
 
-  // ── Shield rotation ──
-  if (gs.autoplay) {
+  // Shield
+  if(gs.autoplay){
     updateAI(dt);
   } else {
-    if (keys['ArrowLeft']  || keys['a'])
-      gs.targetShieldAngle -= 3.5 * gs.mods.shieldSpeedMult * dt;
-    if (keys['ArrowRight'] || keys['d'])
-      gs.targetShieldAngle += 3.5 * gs.mods.shieldSpeedMult * dt;
-    gs.shieldAngle += angleDiff(gs.shieldAngle, gs.targetShieldAngle)
-      * Math.min(1, 12 * gs.mods.shieldSpeedMult * dt);
+    if(keys['ArrowLeft']||keys['a'])  gs.targetShieldAngle-=3.5*gs.mods.shieldSpeedMult*dt;
+    if(keys['ArrowRight']||keys['d']) gs.targetShieldAngle+=3.5*gs.mods.shieldSpeedMult*dt;
+    gs.shieldAngle+=angleDiff(gs.shieldAngle,gs.targetShieldAngle)*Math.min(1,12*gs.mods.shieldSpeedMult*dt);
   }
 
-  // ── Spawning ──
-  gs.spawnTimer -= dt * 1000;
-  if (gs.spawnTimer <= 0 && gs.spawnCount < gs.waveCap) {
-    gs.spawnTimer = gs.cfg.spawnInterval;
+  // ── SPAWNING — runs every frame on timer, never stops until quota met ──
+  gs.spawnTimer-=dt*1000;
+  if(gs.spawnTimer<=0 && gs.spawnedSoFar<gs.totalToSpawn){
+    gs.spawnTimer=gs.cfg.spawnInterval;
     doSpawn();
   }
 
   // ── Meteor update ──
-  for (const m of gs.meteors) {
-    if (!m.active) continue;
-    m.trail.push({x:m.x, y:m.y});
-    if (m.trail.length > 14) m.trail.shift();
-    if (m.curvature) {
-      const spd = Math.hypot(m.vx, m.vy);
-      const va  = Math.atan2(m.vy, m.vx) + m.curvature;
-      m.vx = Math.cos(va) * spd; m.vy = Math.sin(va) * spd;
+  const cullDist=Math.max(canvas.width,canvas.height)*1.25;
+  for(const m of gs.meteors){
+    if(!m.active)continue;
+    m.trail.push({x:m.x,y:m.y});
+    if(m.trail.length>14)m.trail.shift();
+    if(m.curvature){
+      const spd=Math.hypot(m.vx,m.vy);
+      const va=Math.atan2(m.vy,m.vx)+m.curvature;
+      m.vx=Math.cos(va)*spd; m.vy=Math.sin(va)*spd;
     }
-    m.x += m.vx * dt * 60;
-    m.y += m.vy * dt * 60;
+    m.x+=m.vx*dt*60; m.y+=m.vy*dt*60;
 
-    // Cull meteors that have flown far off-screen (escaped without hitting anything).
-    // They count as "used slots" already, so just remove them silently.
-    const cullDist = Math.max(canvas.width, canvas.height) * 1.2;
-    if (Math.hypot(m.x - gs.cx, m.y - gs.cy) > cullDist) {
-      m.active = false;
-      continue;
+    // Cull out-of-bounds — just remove, spawnedSoFar already counted it
+    if(Math.hypot(m.x-gs.cx,m.y-gs.cy)>cullDist){
+      m.active=false; trackRemove(); continue;
     }
 
-    if (hitsShield(m)) {
-      sparks(m.x, m.y, 18, '#0ff', true);
-      sparks(m.x, m.y, 8,  '#fff', false);
-      gs.score     += Math.max(5, 10 + gs.mods.deflectBonus);
-      gs.totalDefl++;
-      gs.levelDefl++;
-      // Check win condition
-      if (gs.totalDefl >= WIN_DEFLECTIONS && gs.level >= MAX_LEVEL) gs.phase = 'win';
+    if(hitsShield(m)){
+      sparks(m.x,m.y,18,'#0ff',true); sparks(m.x,m.y,8,'#fff',false);
+      gs.score+=Math.max(5,10+gs.mods.deflectBonus);
+      gs.totalDefl++; gs.levelDefl++;
+      if(gs.totalDefl>=WIN_DEFLECTIONS&&gs.level>=MAX_LEVEL)gs.phase='win';
 
-      if (m.canSplit) {
-        // Split children: DO NOT add to spawnCount — they're bonus meteors
-        for (let s = 0; s < 2; s++) {
-          const pa  = Math.atan2(m.vy, m.vx) + (s === 0 ? 0.5 : -0.5);
-          const sp2 = Math.hypot(m.vx, m.vy) * 1.3;
-          gs.meteors.push({
-            x:m.x, y:m.y, vx:Math.cos(pa)*sp2, vy:Math.sin(pa)*sp2,
-            radius:6, curvature:0, trail:[], active:true,
-            isVoid:false, size:'small', canSplit:false,
-          });
+      // Twin deflect: damage nearby meteors
+      if(gs.mods.twinDeflect){
+        for(const n of gs.meteors){
+          if(!n.active||n===m||n.isVoid)continue;
+          if(Math.hypot(n.x-m.x,n.y-m.y)<80){
+            n.active=false; trackRemove();
+            sparks(n.x,n.y,10,'#0ff',false);
+            gs.score+=5;
+          }
         }
       }
-      m.active = false;
-      continue;
+
+      if(m.canSplit){
+        // Splits don't count toward quota but DO count as active
+        for(let s=0;s<2;s++){
+          const pa=Math.atan2(m.vy,m.vx)+(s===0?0.5:-0.5);
+          const sp2=Math.hypot(m.vx,m.vy)*1.3;
+          gs.meteors.push({x:m.x,y:m.y,vx:Math.cos(pa)*sp2,vy:Math.sin(pa)*sp2,
+            radius:6,curvature:0,trail:[],active:true,isVoid:false,size:'small',canSplit:false});
+          trackSpawn();
+        }
+      }
+      m.active=false; trackRemove(); continue;
     }
 
-    if (hitsPlanet(m)) {
-      m.active = false;
-      let dmg = gs.cfg.baseDmg + gs.mods.dmgBonus;
-      if (m.isVoid)                           dmg = Math.max(dmg, 35) * 1.6;
-      else if (m.size === 'small' && gs.mods.splitGuard) dmg *= 0.5;
-      else if (m.size === 'small')            dmg *= 0.6;
-      gs.planetHealth -= dmg;
-      gs.perfectLevel  = false;
-      gs.flash  = m.isVoid ? {r:160,g:0,b:255,a:1} : {r:255,g:50,b:50,a:1};
-      gs.shake  = {x:0, y:0, dur: m.isVoid ? 0.7 : 0.4};
-      sparks(m.x, m.y, m.isVoid ? 32 : 18, m.isVoid ? '#c060ff' : '#f44', false);
-      if (gs.planetHealth <= 0) { gs.planetHealth = 0; gs.phase = 'gameover'; }
+    if(hitsPlanet(m)){
+      m.active=false; trackRemove();
+      let dmg=gs.cfg.baseDmg+gs.mods.dmgBonus;
+      if(m.isVoid)            dmg=Math.max(dmg,35)*1.6;
+      else if(m.size==='small'&&gs.mods.splitGuard) dmg*=0.5;
+      else if(m.size==='small') dmg*=0.6;
+      gs.planetHealth-=dmg; gs.perfectLevel=false;
+      gs.flash=m.isVoid?{r:160,g:0,b:255,a:1}:{r:255,g:50,b:50,a:1};
+      gs.shake={x:0,y:0,dur:m.isVoid?0.7:0.4};
+      sparks(m.x,m.y,m.isVoid?32:18,m.isVoid?'#c060ff':'#f44',false);
+      if(gs.planetHealth<=0){gs.planetHealth=0;gs.phase='gameover';}
     }
   }
-  gs.meteors = gs.meteors.filter(m => m.active);
+  gs.meteors=gs.meteors.filter(m=>m.active);
 
   // Particles
-  for (const p of gs.particles) {
-    p.x += p.vx * dt * 60; p.y += p.vy * dt * 60;
-    p.vx *= 0.93; p.vy *= 0.93; p.life -= dt;
+  for(const p of gs.particles){
+    p.x+=p.vx*dt*60; p.y+=p.vy*dt*60;
+    p.vx*=0.93; p.vy*=0.93; p.life-=dt;
   }
-  gs.particles = gs.particles.filter(p => p.life > 0);
+  gs.particles=gs.particles.filter(p=>p.life>0);
 
-  // ── Level complete ──
-  if (gs.spawnCount >= gs.waveCap && gs.meteors.length === 0 && gs.phase === 'playing') {
-    if (gs.perfectLevel) gs.score += 50;
-    gs.transitionTimer = 2.5;
-    gs.phase = 'levelComplete';
+  // ── Level complete: ALL quota spawned AND no active meteors remaining ──
+  if(gs.spawnedSoFar>=gs.totalToSpawn && gs.activeMeteors===0 && gs.phase==='playing'){
+    if(gs.perfectLevel)gs.score+=50;
+    gs.transitionTimer=2.0;
+    gs.phase='levelComplete';
   }
 }
 
-// ── SHOP LOGIC ───────────────────────────────────────────────────────
-function openShop() {
-  gs.phase  = 'shop';
-  gs.shop   = { boughtU:[], boughtD:[], funds:gs.score, clicks:[] };
+// ── SHOP ─────────────────────────────────────────────────────────────
+function openShop(){
+  gs.phase='shop';
+  gs.shop={boughtU:[],boughtD:[],funds:gs.score,clicks:[]};
 }
-function shopOK() {
-  return gs.shop.boughtU.length >= 1 && gs.shop.boughtD.length >= 1;
+function shopOK(){return gs.shop.boughtU.length>=1&&gs.shop.boughtD.length>=1;}
+function handleShopClick(e){
+  const r=canvas.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
+  for(const c of gs.shop.clicks) if(mx>=c.x&&mx<=c.x+c.w&&my>=c.y&&my<=c.y+c.h){c.fn();break;}
 }
-function handleShopClick(e) {
-  const r  = canvas.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  for (const c of gs.shop.clicks)
-    if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) { c.fn(); break; }
-}
-function buyUpg(upg) {
-  if (gs.shop.boughtU.includes(upg.id) || gs.shop.funds < upg.cost) return;
-  gs.shop.funds -= upg.cost; gs.score -= upg.cost;
+function buyUpg(upg){
+  if(gs.shop.boughtU.includes(upg.id)||gs.shop.funds<upg.cost)return;
+  gs.shop.funds-=upg.cost; gs.score-=upg.cost;
   gs.shop.boughtU.push(upg.id); upg.apply(gs.mods);
+  // Apply maxHpBonus immediately
+  if(upg.id==='maxHp'){gs.maxHealth+=25;gs.planetHealth=Math.min(gs.maxHealth,gs.planetHealth+10);}
 }
-function buyDeb(deb) {
-  if (gs.shop.boughtD.includes(deb.id)) return;
+function buyDeb(deb){
+  if(gs.shop.boughtD.includes(deb.id))return;
   gs.shop.boughtD.push(deb.id); deb.apply(gs.mods);
 }
-function closeShop() { if (!shopOK()) return; initLevel(gs.level + 1); }
-
-function handleRestartClick(e) {
-  const r  = canvas.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const bx = gs.cx, by = gs.cy;
-  if (mx >= bx-100 && mx <= bx+100 && my >= by+58 && my <= by+104) initGame();
+function closeShop(){if(!shopOK())return;initLevel(gs.level+1);}
+function handleRestartClick(e){
+  const r=canvas.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
+  const bx=gs.cx,by=gs.cy;
+  if(mx>=bx-100&&mx<=bx+100&&my>=by+58&&my<=by+104)initGame();
 }
 
 // ── DRAW HELPERS ─────────────────────────────────────────────────────
-function rrect(x, y, w, h, r) {
+function rrect(x,y,w,h,r){
   ctx.beginPath();
-  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
 }
 
 // ── DRAW ─────────────────────────────────────────────────────────────
-function draw(t) {
-  const W = canvas.width, H = canvas.height;
-  const cx = gs.cx + gs.shake.x, cy = gs.cy + gs.shake.y;
+function draw(t){
+  const W=canvas.width,H=canvas.height;
+  const cx=gs.cx+gs.shake.x,cy=gs.cy+gs.shake.y;
 
-  ctx.fillStyle = '#030610'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#030610';ctx.fillRect(0,0,W,H);
 
-  // Stars
-  for (const s of gs.stars) {
-    ctx.globalAlpha = s.a; ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+  for(const s of gs.stars){ctx.globalAlpha=s.a;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();}
+  for(const s of gs.twinkleStars){
+    ctx.globalAlpha=0.4+0.6*(0.5+0.5*Math.sin(t*0.001*s.speed+s.phase));
+    ctx.fillStyle='#adf';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();
   }
-  for (const s of gs.twinkleStars) {
-    ctx.globalAlpha = 0.4 + 0.6*(0.5 + 0.5*Math.sin(t*0.001*s.speed + s.phase));
-    ctx.fillStyle = '#adf';
-    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha=1;
 
-  // Planet glow
-  const glo = ctx.createRadialGradient(cx,cy,gs.planetR*0.5,cx,cy,gs.planetR*2.5);
-  glo.addColorStop(0,'rgba(40,180,120,0.25)'); glo.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle = glo;
-  ctx.beginPath(); ctx.arc(cx,cy,gs.planetR*2.5,0,Math.PI*2); ctx.fill();
+  const glo=ctx.createRadialGradient(cx,cy,gs.planetR*0.5,cx,cy,gs.planetR*2.5);
+  glo.addColorStop(0,'rgba(40,180,120,0.25)');glo.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=glo;ctx.beginPath();ctx.arc(cx,cy,gs.planetR*2.5,0,Math.PI*2);ctx.fill();
 
-  // Planet body
-  const pg = ctx.createRadialGradient(cx-15,cy-15,4,cx,cy,gs.planetR);
-  pg.addColorStop(0,'#7ff5c0'); pg.addColorStop(0.35,'#2aa87a');
-  pg.addColorStop(0.7,'#1a6a88'); pg.addColorStop(1,'#0a1a44');
-  ctx.fillStyle = pg;
-  ctx.beginPath(); ctx.arc(cx,cy,gs.planetR,0,Math.PI*2); ctx.fill();
-  ctx.save(); ctx.clip();
-  ctx.globalAlpha = 0.3; ctx.fillStyle = '#4ee5a0';
-  ctx.beginPath(); ctx.ellipse(cx-10,cy-8,22,12,-0.5,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(cx+14,cy+10,12,7,0.3,0,Math.PI*2); ctx.fill();
-  ctx.globalAlpha = 1; ctx.restore();
-  ctx.strokeStyle = 'rgba(120,255,200,0.3)'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(cx,cy,gs.planetR,0,Math.PI*2); ctx.stroke();
+  const pg=ctx.createRadialGradient(cx-15,cy-15,4,cx,cy,gs.planetR);
+  pg.addColorStop(0,'#7ff5c0');pg.addColorStop(0.35,'#2aa87a');pg.addColorStop(0.7,'#1a6a88');pg.addColorStop(1,'#0a1a44');
+  ctx.fillStyle=pg;ctx.beginPath();ctx.arc(cx,cy,gs.planetR,0,Math.PI*2);ctx.fill();
+  ctx.save();ctx.clip();ctx.globalAlpha=0.3;ctx.fillStyle='#4ee5a0';
+  ctx.beginPath();ctx.ellipse(cx-10,cy-8,22,12,-0.5,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(cx+14,cy+10,12,7,0.3,0,Math.PI*2);ctx.fill();
+  ctx.globalAlpha=1;ctx.restore();
+  ctx.strokeStyle='rgba(120,255,200,0.3)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(cx,cy,gs.planetR,0,Math.PI*2);ctx.stroke();
 
-  // Meteors
-  for (const m of gs.meteors) {
-    if (!m.active) continue;
-    if (m.trail.length > 1) {
-      for (let i = 1; i < m.trail.length; i++) {
-        const pct = i / m.trail.length;
-        ctx.globalAlpha = pct * 0.6;
-        ctx.strokeStyle = m.isVoid
-          ? `hsla(${270+pct*30},80%,${40+pct*30}%,1)`
-          : `hsl(${30+pct*20},100%,${50+pct*20}%)`;
-        ctx.lineWidth = m.radius * pct * 0.9; ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(m.trail[i-1].x-gs.cx+cx, m.trail[i-1].y-gs.cy+cy);
-        ctx.lineTo(m.trail[i].x-gs.cx+cx,   m.trail[i].y-gs.cy+cy);
-        ctx.stroke();
+  for(const m of gs.meteors){
+    if(!m.active)continue;
+    if(m.trail.length>1){
+      for(let i=1;i<m.trail.length;i++){
+        const pct=i/m.trail.length;
+        ctx.globalAlpha=pct*0.6;
+        ctx.strokeStyle=m.isVoid?`hsla(${270+pct*30},80%,${40+pct*30}%,1)`:`hsl(${30+pct*20},100%,${50+pct*20}%)`;
+        ctx.lineWidth=m.radius*pct*0.9;ctx.lineCap='round';
+        ctx.beginPath();ctx.moveTo(m.trail[i-1].x-gs.cx+cx,m.trail[i-1].y-gs.cy+cy);ctx.lineTo(m.trail[i].x-gs.cx+cx,m.trail[i].y-gs.cy+cy);ctx.stroke();
       }
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha=1;
     }
-    const mx2 = m.x - gs.cx + cx, my2 = m.y - gs.cy + cy;
-    if (m.isVoid) {
-      const pulse = 0.5 + 0.5*Math.sin(t * 0.015);
-      const vg = ctx.createRadialGradient(mx2,my2,0,mx2,my2,m.radius);
-      vg.addColorStop(0,'#e0aaff'); vg.addColorStop(0.3,'#8020d0'); vg.addColorStop(1,'#1a0030');
-      ctx.fillStyle = vg;
-      ctx.beginPath(); ctx.arc(mx2,my2,m.radius,0,Math.PI*2); ctx.fill();
-      ctx.save(); ctx.globalAlpha = 0.4+0.4*pulse; ctx.strokeStyle = '#c060ff';
-      ctx.lineWidth = 2+pulse*2; ctx.shadowColor = '#c060ff'; ctx.shadowBlur = 14;
-      ctx.beginPath(); ctx.arc(mx2,my2,m.radius+4+pulse*4,0,Math.PI*2); ctx.stroke();
-      ctx.restore();
+    const mx2=m.x-gs.cx+cx,my2=m.y-gs.cy+cy;
+    if(m.isVoid){
+      const pulse=0.5+0.5*Math.sin(t*0.015);
+      const vg=ctx.createRadialGradient(mx2,my2,0,mx2,my2,m.radius);
+      vg.addColorStop(0,'#e0aaff');vg.addColorStop(0.3,'#8020d0');vg.addColorStop(1,'#1a0030');
+      ctx.fillStyle=vg;ctx.beginPath();ctx.arc(mx2,my2,m.radius,0,Math.PI*2);ctx.fill();
+      ctx.save();ctx.globalAlpha=0.4+0.4*pulse;ctx.strokeStyle='#c060ff';ctx.lineWidth=2+pulse*2;ctx.shadowColor='#c060ff';ctx.shadowBlur=14;
+      ctx.beginPath();ctx.arc(mx2,my2,m.radius+4+pulse*4,0,Math.PI*2);ctx.stroke();ctx.restore();
     } else {
-      const mg = ctx.createRadialGradient(mx2,my2,0,mx2,my2,m.radius);
-      mg.addColorStop(0,'#ffe090'); mg.addColorStop(0.4,'#ff6020'); mg.addColorStop(1,'#8b1500');
-      ctx.fillStyle = mg;
-      ctx.beginPath(); ctx.arc(mx2,my2,m.radius,0,Math.PI*2); ctx.fill();
+      const mg=ctx.createRadialGradient(mx2,my2,0,mx2,my2,m.radius);
+      mg.addColorStop(0,'#ffe090');mg.addColorStop(0.4,'#ff6020');mg.addColorStop(1,'#8b1500');
+      ctx.fillStyle=mg;ctx.beginPath();ctx.arc(mx2,my2,m.radius,0,Math.PI*2);ctx.fill();
     }
   }
 
-  // Void warning indicator
-  if (gs.mods.voidWarning && gs.voidWarnTimer > 0) {
-    const alpha = Math.min(1, gs.voidWarnTimer) * (0.5 + 0.5*Math.sin(t*0.02));
-    const wx = cx + Math.cos(gs.voidWarnAngle) * (gs.shieldR + 30);
-    const wy = cy + Math.sin(gs.voidWarnAngle) * (gs.shieldR + 30);
-    ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = '#c060ff'; ctx.lineWidth = 2.5;
-    ctx.setLineDash([7,5]); ctx.beginPath(); ctx.arc(wx,wy,22,0,Math.PI*2); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#e080ff'; ctx.font = 'bold 10px Courier New'; ctx.textAlign = 'center';
-    ctx.fillText('VOID', wx, wy+4); ctx.restore();
+  if(gs.mods.voidWarning&&gs.voidWarnTimer>0){
+    const alpha=Math.min(1,gs.voidWarnTimer)*(0.5+0.5*Math.sin(t*0.02));
+    const wx=cx+Math.cos(gs.voidWarnAngle)*(gs.shieldR+32);
+    const wy=cy+Math.sin(gs.voidWarnAngle)*(gs.shieldR+32);
+    ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle='#c060ff';ctx.lineWidth=2.5;
+    ctx.setLineDash([7,5]);ctx.beginPath();ctx.arc(wx,wy,22,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([]);ctx.fillStyle='#e080ff';ctx.font='bold 10px Courier New';ctx.textAlign='center';
+    ctx.fillText('VOID',wx,wy+4);ctx.restore();
   }
 
-  // Shield arc
-  if (gs.cfg && gs.phase === 'playing') {
-    const arcDeg = Math.max(20, gs.cfg.arcDeg + gs.mods.arcBonus);
-    const arcRad = (arcDeg / 2) * (Math.PI / 180);
-    const pulse  = 0.7 + 0.3*Math.sin(gs.shieldPulse);
-    const sa = gs.shieldAngle - arcRad, ea = gs.shieldAngle + arcRad;
-    ctx.save(); ctx.globalAlpha=0.25*pulse; ctx.strokeStyle='#0ff'; ctx.lineWidth=18;
-    ctx.lineCap='round'; ctx.shadowColor='#0ff'; ctx.shadowBlur=24;
-    ctx.beginPath(); ctx.arc(cx,cy,gs.shieldR,sa,ea); ctx.stroke(); ctx.restore();
-    ctx.save(); ctx.globalAlpha=0.85+0.15*pulse; ctx.strokeStyle='#00efff'; ctx.lineWidth=5;
-    ctx.lineCap='round'; ctx.shadowColor='#00efff'; ctx.shadowBlur=16;
-    ctx.beginPath(); ctx.arc(cx,cy,gs.shieldR,sa,ea); ctx.stroke(); ctx.restore();
-    ctx.save(); ctx.globalAlpha=0.5+0.5*pulse; ctx.strokeStyle='#e0ffff'; ctx.lineWidth=2;
-    ctx.shadowColor='#fff'; ctx.shadowBlur=8;
-    ctx.beginPath(); ctx.arc(cx,cy,gs.shieldR,sa,ea); ctx.stroke(); ctx.restore();
+  if(gs.cfg&&gs.phase==='playing'){
+    const arcDeg=Math.max(20,gs.cfg.arcDeg+gs.mods.arcBonus);
+    const arcRad=(arcDeg/2)*(Math.PI/180);
+    const pulse=0.7+0.3*Math.sin(gs.shieldPulse);
+    const sa=gs.shieldAngle-arcRad,ea=gs.shieldAngle+arcRad;
+    ctx.save();ctx.globalAlpha=0.25*pulse;ctx.strokeStyle='#0ff';ctx.lineWidth=18;ctx.lineCap='round';ctx.shadowColor='#0ff';ctx.shadowBlur=24;ctx.beginPath();ctx.arc(cx,cy,gs.shieldR,sa,ea);ctx.stroke();ctx.restore();
+    ctx.save();ctx.globalAlpha=0.85+0.15*pulse;ctx.strokeStyle='#00efff';ctx.lineWidth=5;ctx.lineCap='round';ctx.shadowColor='#00efff';ctx.shadowBlur=16;ctx.beginPath();ctx.arc(cx,cy,gs.shieldR,sa,ea);ctx.stroke();ctx.restore();
+    ctx.save();ctx.globalAlpha=0.5+0.5*pulse;ctx.strokeStyle='#e0ffff';ctx.lineWidth=2;ctx.shadowColor='#fff';ctx.shadowBlur=8;ctx.beginPath();ctx.arc(cx,cy,gs.shieldR,sa,ea);ctx.stroke();ctx.restore();
   }
 
-  // Particles
-  for (const p of gs.particles) {
-    const alpha = p.life / p.maxLife;
-    ctx.globalAlpha = alpha; ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color; ctx.shadowBlur = 6;
-    ctx.beginPath(); ctx.arc(p.x-gs.cx+cx, p.y-gs.cy+cy, p.radius*alpha, 0, Math.PI*2); ctx.fill();
+  for(const p of gs.particles){
+    const alpha=p.life/p.maxLife;
+    ctx.globalAlpha=alpha;ctx.fillStyle=p.color;ctx.shadowColor=p.color;ctx.shadowBlur=6;
+    ctx.beginPath();ctx.arc(p.x-gs.cx+cx,p.y-gs.cy+cy,p.radius*alpha,0,Math.PI*2);ctx.fill();
   }
-  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  ctx.globalAlpha=1;ctx.shadowBlur=0;
 
-  // Screen flash
-  const sf = gs.flash;
-  if (sf.a > 0) {
-    ctx.fillStyle = `rgba(${sf.r},${sf.g},${sf.b},${sf.a*0.35})`;
-    ctx.fillRect(0,0,W,H);
-  }
+  const sf=gs.flash;
+  if(sf.a>0){ctx.fillStyle=`rgba(${sf.r},${sf.g},${sf.b},${sf.a*0.35})`;ctx.fillRect(0,0,W,H);}
 
-  drawHUD(W, H, t);
-  if (gs.phase === 'levelComplete') drawLvlComplete(W, H);
-  if (gs.phase === 'shop')          drawShop(W, H);
-  if (gs.phase === 'gameover')      drawGameOver(W, H);
-  if (gs.phase === 'win')           drawWin(W, H, t);
+  drawHUD(W,H,t);
+  if(gs.phase==='levelComplete')drawLvlComplete(W,H);
+  if(gs.phase==='shop')         drawShop(W,H);
+  if(gs.phase==='gameover')     drawGameOver(W,H);
+  if(gs.phase==='win')          drawWin(W,H,t);
 }
 
 // ── HUD ──────────────────────────────────────────────────────────────
-function drawHUD(W, H, t) {
-  // Level badge
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(16,16,200,34);
-  ctx.fillStyle = '#0cf'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
-  ctx.fillText(`LEVEL  ${gs.level} / ${MAX_LEVEL}`, 26, 36);
+function drawHUD(W,H,t){
+  ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(16,16,210,34);
+  ctx.fillStyle='#0cf';ctx.font='bold 13px Courier New';ctx.textAlign='left';
+  ctx.fillText(`LEVEL  ${gs.level} / ${MAX_LEVEL}`,26,36);
 
-  // Score
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(W-206,16,190,34);
-  ctx.fillStyle = '#ffe066'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'right';
-  ctx.fillText(`SCORE  ${gs.score}`, W-26, 36); ctx.textAlign = 'left';
+  ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(W-216,16,200,34);
+  ctx.fillStyle='#ffe066';ctx.font='bold 13px Courier New';ctx.textAlign='right';
+  ctx.fillText(`SCORE  ${gs.score}`,W-26,36);ctx.textAlign='left';
 
-  // Health bar
-  const bw=220, bh=14, bx=W/2-bw/2, by=20;
-  const hpct = Math.max(0, gs.planetHealth) / gs.maxHealth;
-  const hcol = `hsl(${Math.floor(hpct*120)},100%,50%)`;
-  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx-2,by-2,bw+4,bh+4);
-  ctx.fillStyle = '#111'; ctx.fillRect(bx,by,bw,bh);
-  ctx.fillStyle = hcol; ctx.shadowColor = hcol; ctx.shadowBlur = 10;
-  ctx.fillRect(bx, by, bw*hpct, bh); ctx.shadowBlur = 0;
-  ctx.fillStyle = '#aaa'; ctx.font = '10px Courier New'; ctx.textAlign = 'center';
-  ctx.fillText('PLANET HEALTH', W/2, by+bh+13);
+  const bw=220,bh=14,bx=W/2-bw/2,by=20;
+  const hpct=Math.max(0,gs.planetHealth)/gs.maxHealth;
+  const hcol=`hsl(${Math.floor(hpct*120)},100%,50%)`;
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(bx-2,by-2,bw+4,bh+4);
+  ctx.fillStyle='#111';ctx.fillRect(bx,by,bw,bh);
+  ctx.fillStyle=hcol;ctx.shadowColor=hcol;ctx.shadowBlur=10;
+  ctx.fillRect(bx,by,bw*hpct,bh);ctx.shadowBlur=0;
+  ctx.fillStyle='#aaa';ctx.font='10px Courier New';ctx.textAlign='center';
+  ctx.fillText(`PLANET HP  ${Math.max(0,Math.ceil(gs.planetHealth))} / ${gs.maxHealth}`,W/2,by+bh+13);
 
-  // Wave counter — clamped: always 0 → waveCap, never negative
-  const displayed = Math.max(0, Math.min(gs.spawnCount, gs.waveCap));
-  ctx.fillStyle = '#445'; ctx.font = '11px Courier New';
-  ctx.fillText(`WAVE  ${displayed} / ${gs.waveCap}`, W/2, by-6);
+  // Wave progress — spawnedSoFar / totalToSpawn, clamped
+  const waveShown=Math.max(0,Math.min(gs.spawnedSoFar,gs.totalToSpawn));
+  ctx.fillStyle='#445';ctx.font='11px Courier New';
+  ctx.fillText(`WAVE  ${waveShown} / ${gs.totalToSpawn}`,W/2,by-6);
 
-  // Deflection progress bar
-  const dpct = Math.min(1, gs.totalDefl / WIN_DEFLECTIONS);
-  const dw=180, dh=8, dx=16, dy=H-52;
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(dx-2,dy-2,dw+4,dh+4);
-  ctx.fillStyle = '#111'; ctx.fillRect(dx,dy,dw,dh);
-  const dcol = dpct >= 1 ? '#ffe066' : '#4af';
-  ctx.fillStyle = dcol; ctx.shadowColor = dcol; ctx.shadowBlur = 6;
-  ctx.fillRect(dx, dy, dw*dpct, dh); ctx.shadowBlur = 0;
-  ctx.fillStyle = '#667'; ctx.font = '10px Courier New'; ctx.textAlign = 'left';
-  ctx.fillText(`DEFLECTIONS  ${gs.totalDefl} / ${WIN_DEFLECTIONS}`, dx, dy+dh+13);
+  const dpct=Math.min(1,gs.totalDefl/WIN_DEFLECTIONS);
+  const dw=180,dh=8,dx=16,dy=H-52;
+  ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(dx-2,dy-2,dw+4,dh+4);
+  ctx.fillStyle='#111';ctx.fillRect(dx,dy,dw,dh);
+  const dcol=dpct>=1?'#ffe066':'#4af';
+  ctx.fillStyle=dcol;ctx.shadowColor=dcol;ctx.shadowBlur=6;
+  ctx.fillRect(dx,dy,dw*dpct,dh);ctx.shadowBlur=0;
+  ctx.fillStyle='#667';ctx.font='10px Courier New';ctx.textAlign='left';
+  ctx.fillText(`DEFLECTIONS  ${gs.totalDefl} / ${WIN_DEFLECTIONS}`,dx,dy+dh+13);
 
-  // Shop soon warning
-  const lvlsToShop = 10 - (gs.level % 10 || 10);
-  if (lvlsToShop > 0 && lvlsToShop <= 3 && gs.level < MAX_LEVEL) {
-    const alpha = 0.6 + 0.4*Math.sin(t*0.005);
-    ctx.globalAlpha = alpha; ctx.fillStyle = '#ffe066'; ctx.font = '11px Courier New';
-    ctx.fillText(`SHOP IN ${lvlsToShop} LEVEL${lvlsToShop===1?'':'S'}`, dx, dy-10);
-    ctx.globalAlpha = 1;
+  const ns=SHOP_EVERY-(gs.level%SHOP_EVERY||SHOP_EVERY);
+  if(ns>0&&ns<=2&&gs.level<MAX_LEVEL){
+    const alpha=0.6+0.4*Math.sin(t*0.005);
+    ctx.globalAlpha=alpha;ctx.fillStyle='#ffe066';ctx.font='11px Courier New';
+    ctx.fillText(`SHOP IN ${ns} LEVEL${ns===1?'':'S'}`,dx,dy-10);ctx.globalAlpha=1;
   }
 
-  // AI indicator
-  if (gs.autoplay) {
-    const a2 = 0.6 + 0.4*Math.sin(t*0.005);
-    ctx.globalAlpha = a2; ctx.fillStyle = '#0ff'; ctx.font = 'bold 11px Courier New';
-    ctx.fillText('AI ACTIVE', 26, H-68); ctx.globalAlpha = 1;
+  if(gs.autoplay){
+    const a2=0.6+0.4*Math.sin(t*0.005);
+    ctx.globalAlpha=a2;ctx.fillStyle='#0ff';ctx.font='bold 11px Courier New';
+    ctx.fillText('AI ACTIVE',26,H-68);ctx.globalAlpha=1;
   }
 
-  // Active mod tags
-  let my = 60; ctx.font = '10px Courier New'; ctx.fillStyle = '#0af'; ctx.textAlign = 'left';
-  if (gs.mods.arcBonus !== 0)       { ctx.fillText(`ARC ${gs.mods.arcBonus>0?'+':''}${Math.round(gs.mods.arcBonus)}deg`, 18, my); my+=15; }
-  if (gs.mods.deflectBonus !== 0)   { ctx.fillText(`+${gs.mods.deflectBonus}pts/hit`, 18, my); my+=15; }
-  if (gs.mods.regenPerLevel > 0)    { ctx.fillText(`REGEN +${gs.mods.regenPerLevel}HP`, 18, my); my+=15; }
-  if (gs.mods.splitGuard)           { ctx.fillText('SPLIT GUARD', 18, my); my+=15; }
-  if (gs.mods.voidWarning)          { ctx.fillText('VOID SENSE', 18, my); my+=15; }
-  if (gs.mods.speedMult < 1)        { ctx.fillText(`SPD ${Math.round(gs.mods.speedMult*100)}%`, 18, my); my+=15; }
+  let my=60;ctx.font='10px Courier New';ctx.fillStyle='#0af';ctx.textAlign='left';
+  if(gs.mods.arcBonus!==0){ctx.fillText(`ARC ${gs.mods.arcBonus>0?'+':''}${Math.round(gs.mods.arcBonus)}deg`,18,my);my+=15;}
+  if(gs.mods.deflectBonus!==0){ctx.fillText(`+${gs.mods.deflectBonus}pts/hit`,18,my);my+=15;}
+  if(gs.mods.regenPerLevel!==0){ctx.fillStyle=gs.mods.regenPerLevel>0?'#4f4':'#f66';ctx.fillText(`REGEN ${gs.mods.regenPerLevel>0?'+':''}${gs.mods.regenPerLevel}HP`,18,my);ctx.fillStyle='#0af';my+=15;}
+  if(gs.mods.splitGuard){ctx.fillText('SPLIT GUARD',18,my);my+=15;}
+  if(gs.mods.voidWarning){ctx.fillText('VOID SENSE',18,my);my+=15;}
+  if(gs.mods.twinDeflect){ctx.fillText('TWIN DEFLECT',18,my);my+=15;}
+  if(gs.mods.speedMult!==1){ctx.fillText(`SPD ${Math.round(gs.mods.speedMult*100)}%`,18,my);my+=15;}
+  if(gs.maxHealth>100){ctx.fillText(`MAX HP ${gs.maxHealth}`,18,my);my+=15;}
 }
 
-// ── LEVEL COMPLETE OVERLAY ───────────────────────────────────────────
-function drawLvlComplete(W, H) {
-  ctx.fillStyle = 'rgba(0,5,20,0.75)'; ctx.fillRect(0,0,W,H);
-  const bx=W/2, by=H/2;
-  ctx.fillStyle = 'rgba(0,18,45,0.94)'; rrect(bx-270,by-120,540,240,16); ctx.fill();
-  ctx.strokeStyle = '#0cf'; ctx.lineWidth = 2;
-  rrect(bx-270,by-120,540,240,16); ctx.stroke();
-  ctx.textAlign = 'center';
-  if (gs.perfectLevel) {
-    ctx.fillStyle = '#ffe066'; ctx.font = 'bold 12px Courier New';
-    ctx.fillText('PERFECT DEFENSE  +50 BONUS', bx, by-86);
-  }
-  ctx.fillStyle = '#0ff'; ctx.font = 'bold 23px Courier New';
-  ctx.fillText(`LEVEL ${gs.level} COMPLETE!`, bx, by-56);
-  if (gs.level % 10 === 0 && gs.level < MAX_LEVEL) {
-    ctx.fillStyle = '#ffe066'; ctx.font = 'bold 14px Courier New';
-    ctx.fillText('SHOP OPENING — SPEND YOUR SCORE', bx, by-24);
+// ── LEVEL COMPLETE ────────────────────────────────────────────────────
+function drawLvlComplete(W,H){
+  ctx.fillStyle='rgba(0,5,20,0.75)';ctx.fillRect(0,0,W,H);
+  const bx=W/2,by=H/2;
+  ctx.fillStyle='rgba(0,18,45,0.94)';rrect(bx-270,by-120,540,240,16);ctx.fill();
+  ctx.strokeStyle='#0cf';ctx.lineWidth=2;rrect(bx-270,by-120,540,240,16);ctx.stroke();
+  ctx.textAlign='center';
+  if(gs.perfectLevel){ctx.fillStyle='#ffe066';ctx.font='bold 12px Courier New';ctx.fillText('PERFECT DEFENSE  +50 BONUS',bx,by-86);}
+  ctx.fillStyle='#0ff';ctx.font='bold 23px Courier New';ctx.fillText(`LEVEL ${gs.level} COMPLETE!`,bx,by-56);
+  if(gs.level%SHOP_EVERY===0&&gs.level<MAX_LEVEL){
+    ctx.fillStyle='#ffe066';ctx.font='bold 14px Courier New';ctx.fillText('SHOP OPENING — SPEND YOUR SCORE',bx,by-24);
   } else {
-    ctx.fillStyle = '#aaf'; ctx.font = '13px Courier New';
-    ctx.fillText(`Wave ${gs.level+1} incoming...`, bx, by-20);
+    ctx.fillStyle='#aaf';ctx.font='13px Courier New';ctx.fillText(`Wave ${gs.level+1} incoming...`,bx,by-20);
   }
-  ctx.fillStyle = '#556'; ctx.font = '11px Courier New';
-  ctx.fillText(`Level deflections: ${gs.levelDefl}  |  Total: ${gs.totalDefl} / ${WIN_DEFLECTIONS}`, bx, by+10);
-  ctx.fillStyle = '#0cf'; ctx.font = '13px Courier New';
-  ctx.fillText(`In ${Math.max(0, gs.transitionTimer).toFixed(1)}s`, bx, by+76);
-  ctx.textAlign = 'left';
-}
-
-// ── SHOP SCREEN ──────────────────────────────────────────────────────
-function drawShop(W, H) {
-  ctx.fillStyle = 'rgba(0,2,14,0.97)'; ctx.fillRect(0,0,W,H);
-  gs.shop.clicks = [];
-  const bx=W/2, by=H/2;
-  const pw=Math.min(W-40,740), ph=Math.min(H-40,590);
-  const px=bx-pw/2, py=by-ph/2;
-
-  ctx.fillStyle = 'rgba(0,8,30,0.98)'; rrect(px,py,pw,ph,18); ctx.fill();
-  ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 2; rrect(px,py,pw,ph,18); ctx.stroke();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffe066'; ctx.font = 'bold 20px Courier New';
-  ctx.fillText(`SHOP  —  After Level ${gs.level}`, bx, py+36);
-  ctx.fillStyle = '#666'; ctx.font = '11px Courier New';
-  ctx.fillText(`Budget: ${gs.shop.funds} pts  |  Buy ≥1 upgrade AND ≥1 debuff to continue`, bx, py+56);
-
-  const uOK=gs.shop.boughtU.length>=1, dOK=gs.shop.boughtD.length>=1;
-  ctx.fillStyle = uOK?'#4f4':'#f66'; ctx.font='11px Courier New';
-  ctx.fillText(`Upgrades: ${gs.shop.boughtU.length}/1 ${uOK?'OK':'needed'}`, bx-90, py+74);
-  ctx.fillStyle = dOK?'#4f4':'#f66';
-  ctx.fillText(`Debuffs: ${gs.shop.boughtD.length}/1 ${dOK?'OK':'needed'}`, bx+90, py+74);
-
-  const cw=(pw/2)-28, ch=52, c1=px+14, c2=px+pw/2+14;
-  let uy=py+94, dy=py+94;
-
-  ctx.fillStyle='#0cf'; ctx.font='bold 12px Courier New'; ctx.textAlign='left';
-  ctx.fillText('UPGRADES', c1+8, uy); uy+=20;
-  ctx.fillStyle='#f66'; ctx.fillText('DEBUFFS  (free — required)', c2+8, dy); dy+=20;
-
-  for (const upg of UPGRADES) {
-    const bought  = gs.shop.boughtU.includes(upg.id);
-    const afford  = gs.shop.funds >= upg.cost;
-    ctx.fillStyle = bought?'rgba(0,80,40,0.75)':afford?'rgba(0,25,55,0.8)':'rgba(8,8,8,0.7)';
-    rrect(c1,uy,cw,ch,7); ctx.fill();
-    ctx.strokeStyle = bought?'#4f4':'#0cf4'; ctx.lineWidth=1; rrect(c1,uy,cw,ch,7); ctx.stroke();
-    ctx.fillStyle = bought?'#4f4':afford?'#0ff':'#445';
-    ctx.font='bold 11px Courier New'; ctx.textAlign='left';
-    ctx.fillText(upg.name, c1+8, uy+18);
-    ctx.fillStyle='#778'; ctx.font='10px Courier New'; ctx.fillText(upg.desc, c1+8, uy+32);
-    ctx.fillStyle=bought?'#4f4':'#ffe066'; ctx.font='bold 10px Courier New'; ctx.textAlign='right';
-    ctx.fillText(bought?'BOUGHT':`${upg.cost}pts`, c1+cw-8, uy+18);
-    if (!bought) gs.shop.clicks.push({x:c1,y:uy,w:cw,h:ch,fn:()=>buyUpg(upg)});
-    uy += ch+5;
-  }
-
-  for (const deb of DEBUFFS) {
-    const bought = gs.shop.boughtD.includes(deb.id);
-    ctx.fillStyle = bought?'rgba(70,0,0,0.75)':'rgba(28,8,8,0.8)';
-    rrect(c2,dy,cw,ch,7); ctx.fill();
-    ctx.strokeStyle = bought?'#f44':'#f664'; ctx.lineWidth=1; rrect(c2,dy,cw,ch,7); ctx.stroke();
-    ctx.fillStyle = bought?'#f66':'#faa';
-    ctx.font='bold 11px Courier New'; ctx.textAlign='left';
-    ctx.fillText(deb.name, c2+8, dy+18);
-    ctx.fillStyle='#778'; ctx.font='10px Courier New'; ctx.fillText(deb.desc, c2+8, dy+32);
-    ctx.fillStyle='#4f4'; ctx.font='bold 10px Courier New'; ctx.textAlign='right';
-    ctx.fillText(bought?'APPLIED':'FREE', c2+cw-8, dy+18);
-    if (!bought) gs.shop.clicks.push({x:c2,y:dy,w:cw,h:ch,fn:()=>buyDeb(deb)});
-    dy += ch+5;
-  }
-
-  const can=shopOK(), bw2=220, bh2=42, bx2=bx-bw2/2, by2=py+ph-60;
-  ctx.fillStyle=can?'#ffe066':'#2a2a2a'; rrect(bx2,by2,bw2,bh2,10); ctx.fill();
-  ctx.fillStyle=can?'#000':'#555'; ctx.font='bold 14px Courier New'; ctx.textAlign='center';
-  ctx.fillText(can?'CONTINUE':'Buy 1 upgrade + 1 debuff first', bx, by2+26);
-  if (can) gs.shop.clicks.push({x:bx2,y:by2,w:bw2,h:bh2,fn:closeShop});
+  ctx.fillStyle='#556';ctx.font='11px Courier New';ctx.fillText(`Level deflections: ${gs.levelDefl}  |  Total: ${gs.totalDefl} / ${WIN_DEFLECTIONS}`,bx,by+10);
+  ctx.fillStyle='#0cf';ctx.font='13px Courier New';ctx.fillText(`In ${Math.max(0,gs.transitionTimer).toFixed(1)}s`,bx,by+76);
   ctx.textAlign='left';
 }
 
-// ── GAME OVER ────────────────────────────────────────────────────────
-function drawGameOver(W, H) {
-  ctx.fillStyle = 'rgba(0,0,0,0.86)'; ctx.fillRect(0,0,W,H);
-  const bx=W/2, by=H/2;
-  ctx.fillStyle = 'rgba(28,0,0,0.94)'; rrect(bx-270,by-140,540,280,16); ctx.fill();
-  ctx.strokeStyle = '#f44'; ctx.lineWidth=2; rrect(bx-270,by-140,540,280,16); ctx.stroke();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f55'; ctx.font = 'bold 32px Courier New';
-  ctx.fillText('PLANET DESTROYED', bx, by-88);
-  ctx.fillStyle = '#999'; ctx.font = '14px Courier New';
-  ctx.fillText(`Level: ${gs.level}  |  Score: ${gs.score}`, bx, by-44);
-  ctx.fillText(`Deflections: ${gs.totalDefl} / ${WIN_DEFLECTIONS}`, bx, by-18);
-  const wpct = Math.min(100, Math.floor(gs.totalDefl/WIN_DEFLECTIONS*100));
-  ctx.fillStyle = '#445'; ctx.font='12px Courier New';
-  ctx.fillText(`Win progress: ${wpct}%`, bx, by+8);
-  ctx.fillStyle = '#f44'; rrect(bx-100,by+58,200,44,10); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font='bold 15px Courier New';
-  ctx.fillText('PLAY AGAIN', bx, by+84);
-  ctx.textAlign = 'left';
+// ── SHOP ─────────────────────────────────────────────────────────────
+function drawShop(W,H){
+  ctx.fillStyle='rgba(0,2,14,0.97)';ctx.fillRect(0,0,W,H);
+  gs.shop.clicks=[];
+  const bx=W/2,by=H/2;
+  const pw=Math.min(W-20,860),ph=Math.min(H-20,640);
+  const px=bx-pw/2,py=by-ph/2;
+
+  ctx.fillStyle='rgba(0,8,30,0.99)';rrect(px,py,pw,ph,18);ctx.fill();
+  ctx.strokeStyle='#ffe066';ctx.lineWidth=2;rrect(px,py,pw,ph,18);ctx.stroke();
+  ctx.textAlign='center';
+  ctx.fillStyle='#ffe066';ctx.font='bold 19px Courier New';ctx.fillText(`SHOP — After Level ${gs.level}`,bx,py+34);
+  ctx.fillStyle='#555';ctx.font='11px Courier New';
+  ctx.fillText(`Budget: ${gs.shop.funds} pts  |  Buy ≥1 upgrade + ≥1 debuff to continue`,bx,py+52);
+
+  const uOK=gs.shop.boughtU.length>=1,dOK=gs.shop.boughtD.length>=1;
+  ctx.fillStyle=uOK?'#4f4':'#f66';ctx.fillText(`Upgrades: ${gs.shop.boughtU.length}/1 ${uOK?'✓':'✗'}`,bx-90,py+70);
+  ctx.fillStyle=dOK?'#4f4':'#f66';ctx.fillText(`Debuffs: ${gs.shop.boughtD.length}/1 ${dOK?'✓':'✗'}`,bx+90,py+70);
+
+  const colW=(pw/2)-22,ch=46,c1=px+10,c2=px+pw/2+12;
+  let uy=py+86,dy=py+86;
+
+  ctx.fillStyle='#0cf';ctx.font='bold 11px Courier New';ctx.textAlign='left';
+  ctx.fillText('UPGRADES',c1+6,uy);uy+=18;
+  ctx.fillStyle='#f66';ctx.fillText('DEBUFFS (free — pick ≥1)',c2+6,dy);dy+=18;
+
+  for(const upg of UPGRADES){
+    if(uy+ch>py+ph-70)break;
+    const bought=gs.shop.boughtU.includes(upg.id);
+    const afford=gs.shop.funds>=upg.cost;
+    ctx.fillStyle=bought?'rgba(0,70,35,0.8)':afford?'rgba(0,22,50,0.85)':'rgba(6,6,6,0.75)';
+    rrect(c1,uy,colW,ch,6);ctx.fill();
+    ctx.strokeStyle=bought?'#4f4':'#0cf3';ctx.lineWidth=1;rrect(c1,uy,colW,ch,6);ctx.stroke();
+    ctx.fillStyle=bought?'#4f4':afford?'#0ff':'#444';ctx.font='bold 10px Courier New';ctx.textAlign='left';
+    ctx.fillText(upg.name,c1+7,uy+15);
+    ctx.fillStyle='#667';ctx.font='9px Courier New';ctx.fillText(upg.desc,c1+7,uy+28);
+    ctx.fillStyle=bought?'#4f4':'#ffe066';ctx.font='bold 9px Courier New';ctx.textAlign='right';
+    ctx.fillText(bought?'BOUGHT':`${upg.cost}pts`,c1+colW-7,uy+15);
+    if(!bought)gs.shop.clicks.push({x:c1,y:uy,w:colW,h:ch,fn:()=>buyUpg(upg)});
+    uy+=ch+4;
+  }
+
+  for(const deb of DEBUFFS){
+    if(dy+ch>py+ph-70)break;
+    const bought=gs.shop.boughtD.includes(deb.id);
+    ctx.fillStyle=bought?'rgba(60,0,0,0.8)':'rgba(25,6,6,0.85)';
+    rrect(c2,dy,colW,ch,6);ctx.fill();
+    ctx.strokeStyle=bought?'#f44':'#f663';ctx.lineWidth=1;rrect(c2,dy,colW,ch,6);ctx.stroke();
+    ctx.fillStyle=bought?'#f66':'#faa';ctx.font='bold 10px Courier New';ctx.textAlign='left';
+    ctx.fillText(deb.name,c2+7,dy+15);
+    ctx.fillStyle='#667';ctx.font='9px Courier New';ctx.fillText(deb.desc,c2+7,dy+28);
+    ctx.fillStyle=bought?'#f44':'#4f4';ctx.font='bold 9px Courier New';ctx.textAlign='right';
+    ctx.fillText(bought?'APPLIED':'FREE',c2+colW-7,dy+15);
+    if(!bought)gs.shop.clicks.push({x:c2,y:dy,w:colW,h:ch,fn:()=>buyDeb(deb)});
+    dy+=ch+4;
+  }
+
+  const can=shopOK(),bw2=220,bh2=40,bx2=bx-bw2/2,by2=py+ph-56;
+  ctx.fillStyle=can?'#ffe066':'#222';rrect(bx2,by2,bw2,bh2,10);ctx.fill();
+  ctx.fillStyle=can?'#000':'#444';ctx.font='bold 13px Courier New';ctx.textAlign='center';
+  ctx.fillText(can?'CONTINUE':'Need 1 upgrade + 1 debuff',bx,by2+25);
+  if(can)gs.shop.clicks.push({x:bx2,y:by2,w:bw2,h:bh2,fn:closeShop});
+  ctx.textAlign='left';
 }
 
-// ── WIN SCREEN ───────────────────────────────────────────────────────
-function drawWin(W, H, t) {
-  ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0,0,W,H);
-  const bx=W/2, by=H/2;
-  const pulse = 0.6 + 0.4*Math.sin(t*0.003);
-  ctx.fillStyle = 'rgba(8,18,4,0.96)'; rrect(bx-290,by-170,580,340,20); ctx.fill();
-  ctx.strokeStyle = `rgba(255,220,50,${pulse})`; ctx.lineWidth=3;
-  rrect(bx-290,by-170,580,340,20); ctx.stroke();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffe066'; ctx.font='bold 28px Courier New';
-  ctx.fillText('PLANET SAVED', bx, by-120);
-  ctx.fillStyle = '#aff'; ctx.font='13px Courier New';
-  ctx.fillText('500 meteors deflected. All 100 levels survived.', bx, by-82);
-  ctx.fillText('The cosmos remembers your name.', bx, by-60);
-  ctx.fillStyle = '#ffe066'; ctx.font='bold 16px Courier New';
-  ctx.fillText(`Final Score: ${gs.score}`, bx, by-28);
-  ctx.fillStyle = '#778'; ctx.font='12px Courier New';
-  ctx.fillText(`Deflections: ${gs.totalDefl}  |  Level: ${gs.level}`, bx, by-4);
-  ctx.fillStyle = '#ffe066'; rrect(bx-100,by+58,200,44,10); ctx.fill();
-  ctx.fillStyle = '#000'; ctx.font='bold 15px Courier New';
-  ctx.fillText('PLAY AGAIN', bx, by+84);
-  ctx.textAlign = 'left';
+// ── GAME OVER ─────────────────────────────────────────────────────────
+function drawGameOver(W,H){
+  ctx.fillStyle='rgba(0,0,0,0.87)';ctx.fillRect(0,0,W,H);
+  const bx=W/2,by=H/2;
+  ctx.fillStyle='rgba(28,0,0,0.95)';rrect(bx-270,by-140,540,280,16);ctx.fill();
+  ctx.strokeStyle='#f44';ctx.lineWidth=2;rrect(bx-270,by-140,540,280,16);ctx.stroke();
+  ctx.textAlign='center';
+  ctx.fillStyle='#f55';ctx.font='bold 32px Courier New';ctx.fillText('PLANET DESTROYED',bx,by-90);
+  ctx.fillStyle='#999';ctx.font='14px Courier New';
+  ctx.fillText(`Level: ${gs.level}  |  Score: ${gs.score}`,bx,by-46);
+  ctx.fillText(`Deflections: ${gs.totalDefl} / ${WIN_DEFLECTIONS}`,bx,by-20);
+  ctx.fillStyle='#445';ctx.font='12px Courier New';
+  ctx.fillText(`Win progress: ${Math.min(100,Math.floor(gs.totalDefl/WIN_DEFLECTIONS*100))}%`,bx,by+6);
+  ctx.fillStyle='#f44';rrect(bx-100,by+58,200,44,10);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 15px Courier New';ctx.fillText('PLAY AGAIN',bx,by+84);
+  ctx.textAlign='left';
 }
 
-// ── LOOP ─────────────────────────────────────────────────────────────
-let lastTime = 0;
-function loop(ts) {
-  const dt = Math.min((ts - lastTime) / 1000, 0.05);
-  lastTime = ts; gs.frameTime = ts;
-  update(dt); draw(ts);
+// ── WIN ───────────────────────────────────────────────────────────────
+function drawWin(W,H,t){
+  ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(0,0,W,H);
+  const bx=W/2,by=H/2;
+  const pulse=0.6+0.4*Math.sin(t*0.003);
+  ctx.fillStyle='rgba(8,18,4,0.97)';rrect(bx-290,by-170,580,340,20);ctx.fill();
+  ctx.strokeStyle=`rgba(255,220,50,${pulse})`;ctx.lineWidth=3;rrect(bx-290,by-170,580,340,20);ctx.stroke();
+  ctx.textAlign='center';
+  ctx.fillStyle='#ffe066';ctx.font='bold 28px Courier New';ctx.fillText('PLANET SAVED',bx,by-120);
+  ctx.fillStyle='#aff';ctx.font='13px Courier New';
+  ctx.fillText('500 meteors deflected. All 100 levels survived.',bx,by-82);
+  ctx.fillText('The cosmos remembers your name.',bx,by-60);
+  ctx.fillStyle='#ffe066';ctx.font='bold 16px Courier New';ctx.fillText(`Final Score: ${gs.score}`,bx,by-28);
+  ctx.fillStyle='#778';ctx.font='12px Courier New';ctx.fillText(`Deflections: ${gs.totalDefl}  |  Level: ${gs.level}`,bx,by-4);
+  ctx.fillStyle='#ffe066';rrect(bx-100,by+58,200,44,10);ctx.fill();
+  ctx.fillStyle='#000';ctx.font='bold 15px Courier New';ctx.fillText('PLAY AGAIN',bx,by+84);
+  ctx.textAlign='left';
+}
+
+// ── LOOP ──────────────────────────────────────────────────────────────
+let lastTime=0;
+function loop(ts){
+  const dt=Math.min((ts-lastTime)/1000,0.05);
+  lastTime=ts; gs.frameTime=ts;
+  update(dt);draw(ts);
   requestAnimationFrame(loop);
 }
 
-resize(); initStars(); initGame(); requestAnimationFrame(loop);
+resize();initStars();initGame();requestAnimationFrame(loop);
 </script>
 </body>
 </html>
