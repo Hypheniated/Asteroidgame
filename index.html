@@ -157,7 +157,8 @@ const gs = {
     meteorMult:1,
   },
 
-  shop:{ boughtU:[], boughtD:[], funds:0, clicks:[] },
+  // boughtU / boughtD: {id -> count} maps — same item can be stacked multiple times
+  shop:{ boughtU:{}, boughtD:{}, funds:0, clicks:[] },
 
   autoplay:false,
   ai:{targetAngle:0, reactionTimer:0, pendingTarget:0, angleError:0},
@@ -247,7 +248,7 @@ function initGame() {
     speedMult:1, splitGuard:false, voidWarning:false, dmgBonus:0,
     voidFreq:1, twinDeflect:false, maxHpBonus:0, meteorMult:1,
   };
-  gs.shop = {boughtU:[], boughtD:[], funds:0, clicks:[]};
+  gs.shop = {boughtU:{},boughtD:{},funds:0,clicks:[]};
   initLevel(1);
 }
 
@@ -506,24 +507,31 @@ function update(dt) {
 // ── SHOP ─────────────────────────────────────────────────────────────
 function openShop(){
   gs.phase='shop';
-  gs.shop={boughtU:[],boughtD:[],funds:gs.score,clicks:[]};
+  gs.shop={boughtU:{},boughtD:{},funds:gs.score,clicks:[]};
 }
-function shopOK(){return gs.shop.boughtU.length>=1&&gs.shop.boughtD.length>=1;}
+function shopOK(){
+  const uCount=Object.values(gs.shop.boughtU).reduce((a,b)=>a+b,0);
+  const dCount=Object.values(gs.shop.boughtD).reduce((a,b)=>a+b,0);
+  return uCount>=1&&dCount>=1;
+}
+function shopUTotal(){return Object.values(gs.shop.boughtU).reduce((a,b)=>a+b,0);}
+function shopDTotal(){return Object.values(gs.shop.boughtD).reduce((a,b)=>a+b,0);}
 function handleShopClick(e){
   const r=canvas.getBoundingClientRect();
   const mx=e.clientX-r.left,my=e.clientY-r.top;
   for(const c of gs.shop.clicks) if(mx>=c.x&&mx<=c.x+c.w&&my>=c.y&&my<=c.y+c.h){c.fn();break;}
 }
 function buyUpg(upg){
-  if(gs.shop.boughtU.includes(upg.id)||gs.shop.funds<upg.cost)return;
+  if(gs.shop.funds<upg.cost)return;
   gs.shop.funds-=upg.cost; gs.score-=upg.cost;
-  gs.shop.boughtU.push(upg.id); upg.apply(gs.mods);
-  // Apply maxHpBonus immediately
+  gs.shop.boughtU[upg.id]=(gs.shop.boughtU[upg.id]||0)+1;
+  upg.apply(gs.mods);
+  // maxHp upgrade: boost health pool each stack
   if(upg.id==='maxHp'){gs.maxHealth+=25;gs.planetHealth=Math.min(gs.maxHealth,gs.planetHealth+10);}
 }
 function buyDeb(deb){
-  if(gs.shop.boughtD.includes(deb.id))return;
-  gs.shop.boughtD.push(deb.id); deb.apply(gs.mods);
+  gs.shop.boughtD[deb.id]=(gs.shop.boughtD[deb.id]||0)+1;
+  deb.apply(gs.mods);
 }
 function closeShop(){if(!shopOK())return;initLevel(gs.level+1);}
 function handleRestartClick(e){
@@ -724,54 +732,70 @@ function drawShop(W,H){
   ctx.textAlign='center';
   ctx.fillStyle='#ffe066';ctx.font='bold 19px Courier New';ctx.fillText(`SHOP — After Level ${gs.level}`,bx,py+34);
   ctx.fillStyle='#555';ctx.font='11px Courier New';
-  ctx.fillText(`Budget: ${gs.shop.funds} pts  |  Buy ≥1 upgrade + ≥1 debuff to continue`,bx,py+52);
+  ctx.fillText(`Budget: ${gs.shop.funds} pts  |  Stack upgrades & debuffs freely — buy ≥1 of each to continue`,bx,py+52);
 
-  const uOK=gs.shop.boughtU.length>=1,dOK=gs.shop.boughtD.length>=1;
-  ctx.fillStyle=uOK?'#4f4':'#f66';ctx.fillText(`Upgrades: ${gs.shop.boughtU.length}/1 ${uOK?'✓':'✗'}`,bx-90,py+70);
-  ctx.fillStyle=dOK?'#4f4':'#f66';ctx.fillText(`Debuffs: ${gs.shop.boughtD.length}/1 ${dOK?'✓':'✗'}`,bx+90,py+70);
+  const uTot=shopUTotal(),dTot=shopDTotal();
+  const uOK=uTot>=1,dOK=dTot>=1;
+  ctx.fillStyle=uOK?'#4f4':'#f66';ctx.fillText(`Upgrades bought: ${uTot} ${uOK?'✓':'✗'}`,bx-100,py+70);
+  ctx.fillStyle=dOK?'#4f4':'#f66';ctx.fillText(`Debuffs taken: ${dTot} ${dOK?'✓':'✗'}`,bx+100,py+70);
 
   const colW=(pw/2)-22,ch=46,c1=px+10,c2=px+pw/2+12;
   let uy=py+86,dy=py+86;
 
   ctx.fillStyle='#0cf';ctx.font='bold 11px Courier New';ctx.textAlign='left';
-  ctx.fillText('UPGRADES',c1+6,uy);uy+=18;
-  ctx.fillStyle='#f66';ctx.fillText('DEBUFFS (free — pick ≥1)',c2+6,dy);dy+=18;
+  ctx.fillText('UPGRADES  (stackable — buy same one multiple times)',c1+6,uy);uy+=18;
+  ctx.fillStyle='#f66';ctx.fillText('DEBUFFS  (free & stackable — pick ≥1)',c2+6,dy);dy+=18;
 
   for(const upg of UPGRADES){
     if(uy+ch>py+ph-70)break;
-    const bought=gs.shop.boughtU.includes(upg.id);
+    const stackCount=gs.shop.boughtU[upg.id]||0;
     const afford=gs.shop.funds>=upg.cost;
-    ctx.fillStyle=bought?'rgba(0,70,35,0.8)':afford?'rgba(0,22,50,0.85)':'rgba(6,6,6,0.75)';
+    // Colour: green tint if stacked, blue if affordable, dark if not
+    ctx.fillStyle=stackCount>0?(afford?'rgba(0,70,35,0.85)':'rgba(0,50,25,0.7)'):afford?'rgba(0,22,50,0.85)':'rgba(6,6,6,0.75)';
     rrect(c1,uy,colW,ch,6);ctx.fill();
-    ctx.strokeStyle=bought?'#4f4':'#0cf3';ctx.lineWidth=1;rrect(c1,uy,colW,ch,6);ctx.stroke();
-    ctx.fillStyle=bought?'#4f4':afford?'#0ff':'#444';ctx.font='bold 10px Courier New';ctx.textAlign='left';
+    ctx.strokeStyle=stackCount>0?'#4f4':'#0cf3';ctx.lineWidth=afford?1.5:0.5;rrect(c1,uy,colW,ch,6);ctx.stroke();
+    ctx.fillStyle=afford?'#0ff':'#444';ctx.font='bold 10px Courier New';ctx.textAlign='left';
     ctx.fillText(upg.name,c1+7,uy+15);
     ctx.fillStyle='#667';ctx.font='9px Courier New';ctx.fillText(upg.desc,c1+7,uy+28);
-    ctx.fillStyle=bought?'#4f4':'#ffe066';ctx.font='bold 9px Courier New';ctx.textAlign='right';
-    ctx.fillText(bought?'BOUGHT':`${upg.cost}pts`,c1+colW-7,uy+15);
-    if(!bought)gs.shop.clicks.push({x:c1,y:uy,w:colW,h:ch,fn:()=>buyUpg(upg)});
+    // Right side: cost + stack badge
+    ctx.textAlign='right';
+    ctx.fillStyle=afford?'#ffe066':'#555';ctx.font='bold 9px Courier New';
+    ctx.fillText(`${upg.cost}pts`,c1+colW-7,uy+15);
+    if(stackCount>0){
+      // Stack count badge
+      ctx.fillStyle='#4f4';ctx.font='bold 9px Courier New';
+      ctx.fillText(`×${stackCount} owned`,c1+colW-7,uy+28);
+    }
+    // Always clickable as long as affordable
+    if(afford)gs.shop.clicks.push({x:c1,y:uy,w:colW,h:ch,fn:()=>buyUpg(upg)});
     uy+=ch+4;
   }
 
   for(const deb of DEBUFFS){
     if(dy+ch>py+ph-70)break;
-    const bought=gs.shop.boughtD.includes(deb.id);
-    ctx.fillStyle=bought?'rgba(60,0,0,0.8)':'rgba(25,6,6,0.85)';
+    const stackCount=gs.shop.boughtD[deb.id]||0;
+    ctx.fillStyle=stackCount>0?'rgba(80,0,0,0.85)':'rgba(25,6,6,0.85)';
     rrect(c2,dy,colW,ch,6);ctx.fill();
-    ctx.strokeStyle=bought?'#f44':'#f663';ctx.lineWidth=1;rrect(c2,dy,colW,ch,6);ctx.stroke();
-    ctx.fillStyle=bought?'#f66':'#faa';ctx.font='bold 10px Courier New';ctx.textAlign='left';
+    ctx.strokeStyle=stackCount>0?'#f44':'#f663';ctx.lineWidth=stackCount>0?1.5:1;rrect(c2,dy,colW,ch,6);ctx.stroke();
+    ctx.fillStyle=stackCount>0?'#f66':'#faa';ctx.font='bold 10px Courier New';ctx.textAlign='left';
     ctx.fillText(deb.name,c2+7,dy+15);
     ctx.fillStyle='#667';ctx.font='9px Courier New';ctx.fillText(deb.desc,c2+7,dy+28);
-    ctx.fillStyle=bought?'#f44':'#4f4';ctx.font='bold 9px Courier New';ctx.textAlign='right';
-    ctx.fillText(bought?'APPLIED':'FREE',c2+colW-7,dy+15);
-    if(!bought)gs.shop.clicks.push({x:c2,y:dy,w:colW,h:ch,fn:()=>buyDeb(deb)});
+    ctx.textAlign='right';
+    ctx.fillStyle='#4f4';ctx.font='bold 9px Courier New';
+    ctx.fillText('FREE',c2+colW-7,dy+15);
+    if(stackCount>0){
+      ctx.fillStyle='#f66';ctx.font='bold 9px Courier New';
+      ctx.fillText(`×${stackCount} applied`,c2+colW-7,dy+28);
+    }
+    // Always clickable — free, stackable
+    gs.shop.clicks.push({x:c2,y:dy,w:colW,h:ch,fn:()=>buyDeb(deb)});
     dy+=ch+4;
   }
 
   const can=shopOK(),bw2=220,bh2=40,bx2=bx-bw2/2,by2=py+ph-56;
   ctx.fillStyle=can?'#ffe066':'#222';rrect(bx2,by2,bw2,bh2,10);ctx.fill();
   ctx.fillStyle=can?'#000':'#444';ctx.font='bold 13px Courier New';ctx.textAlign='center';
-  ctx.fillText(can?'CONTINUE':'Need 1 upgrade + 1 debuff',bx,by2+25);
+  ctx.fillText(can?'CONTINUE':'Need 1 upgrade + 1 debuff first',bx,by2+25);
   if(can)gs.shop.clicks.push({x:bx2,y:by2,w:bw2,h:bh2,fn:closeShop});
   ctx.textAlign='left';
 }
